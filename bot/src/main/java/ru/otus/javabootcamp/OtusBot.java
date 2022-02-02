@@ -1,6 +1,8 @@
 package ru.otus.javabootcamp;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -19,7 +21,9 @@ public class OtusBot extends TelegramLongPollingBot {
   private final ListNotificationApiQuery listQuery = new ListNotificationApiQuery();
   private final AddNotificationApiQuery addNotificationApiQuery = new AddNotificationApiQuery();
   private final DeleteNotificationApiQuery deleteNotificationApiQuery = new DeleteNotificationApiQuery();
+  private final ThresholdViolationApiQuery violationApiQuery = new ThresholdViolationApiQuery();
 
+  private final Map<String, Long> users = new HashMap<>();
 
   private final List<Pair<Function<String, Boolean>, MessageHandler>> handlers = List.of(
       Pair.of(messageText -> messageText.startsWith(BotCommands.listCommand), this::handleList),
@@ -27,6 +31,11 @@ public class OtusBot extends TelegramLongPollingBot {
       Pair.of(messageText -> messageText.startsWith(BotCommands.reportCommand), this::handleReport),
       Pair.of(messageText -> messageText.startsWith(BotCommands.deleteCommand), this::handleDelete)
   );
+
+  public OtusBot() {
+    super();
+    startAlertTimers();
+  }
 
 
   @Override
@@ -48,6 +57,8 @@ public class OtusBot extends TelegramLongPollingBot {
       Long chatId = message.getChatId();
       String user = message.getFrom().getUserName();
 
+      users.put(user, chatId);
+
       try {
         log.debug("Got the message {} from the user {} in the chat {}", messageText, user, chatId);
 
@@ -62,6 +73,35 @@ public class OtusBot extends TelegramLongPollingBot {
         log.error(String.format("An error occurred during sending message %s", messageText), e);
       }
     }
+  }
+
+  private void startAlertTimers() {
+    ScheduledExecutor executor = new ScheduledExecutor(() -> {
+      try {
+        List<ThresholdViolation> violations = violationApiQuery.execute();
+
+        violations.forEach(violation -> {
+          if (users.containsKey(violation.username())) {
+            SendMessage sendMessage = new SendMessage();
+            sendMessage.setChatId(String.valueOf(users.get(violation.username())));
+            sendMessage.setText(violation.toString());
+            try {
+              execute(sendMessage);
+            } catch (TelegramApiException e) {
+              log.error(String.format("Error during sending violations to %s", violation.username()), e);
+            }
+          } else {
+            log.warn("Could not find chat for user {}", violation.username());
+          }
+        });
+
+
+      } catch (ApiCallException e) {
+        log.error("Error during querying violations", e);
+      }
+    }, 10);
+
+    executor.start();
   }
 
   private void handleUnknownCommand(Message message) throws TelegramApiException {
