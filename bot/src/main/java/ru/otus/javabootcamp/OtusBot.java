@@ -1,16 +1,10 @@
 package ru.otus.javabootcamp;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
@@ -22,9 +16,9 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 @Slf4j
 public class OtusBot extends TelegramLongPollingBot {
 
-  final OkHttpClient httpClient = new OkHttpClient();
-  final String apiUrl = "http://localhost:8080";
-  final ObjectMapper mapper = new ObjectMapper();
+  private final ListNotificationApiQuery listQuery = new ListNotificationApiQuery();
+  private final AddNotificationApiQuery addNotificationApiQuery = new AddNotificationApiQuery();
+  private final DeleteNotificationApiQuery deleteNotificationApiQuery = new DeleteNotificationApiQuery();
 
 
   private final List<Pair<Function<String, Boolean>, MessageHandler>> handlers = List.of(
@@ -80,39 +74,14 @@ public class OtusBot extends TelegramLongPollingBot {
 
   private void handleList(Message message) throws TelegramApiException {
 
-    Request request = new Request.Builder().url(apiUrl + "/notifications").build();
-
     List<HeartBeatsNotification> notifications = List.of();
 
-    try (Response response = httpClient.newCall(request).execute()) {
+    try {
+      notifications = listQuery.execute(message.getFrom().getUserName());
 
-      if (!response.isSuccessful()) {
-        log.error(response.toString());
-        handleError(message, response.toString());
-        return;
-      }
-
-      ResponseBody body = response.body();
-
-      if (body != null) {
-        TypeReference<List<HeartBeatsNotification>> typeRef
-            = new TypeReference<>() {
-        };
-
-        String content = body.string();
-
-        log.debug("Got the response {}", content);
-
-        notifications = mapper.readValue(content, typeRef);
-      }
-
-    } catch (IOException exception) {
+    } catch (ApiCallException exception) {
+      log.error("Error during querying", exception);
       handleError(message, exception.getMessage());
-
-      String errorMessage = String.format(
-          "Got error during calling api call [%s]", apiUrl);
-
-      log.error(errorMessage);
     }
 
     String notificationListMessage =
@@ -130,6 +99,22 @@ public class OtusBot extends TelegramLongPollingBot {
 
 
   private void handleAdd(Message message) throws TelegramApiException {
+    Optional<HeartBeatsNotification> notification = MessageParser.parse(message.getText());
+
+    if (notification.isEmpty()) {
+      handleError(message, "Некорректные параметры");
+      return;
+    }
+    String user = message.getFrom().getUserName();
+
+    try {
+      addNotificationApiQuery.execute(user, notification.get());
+
+    } catch (ApiCallException exception) {
+      log.error("Error during querying", exception);
+      handleError(message, exception.getMessage());
+    }
+
     SendMessage sendMessage = SendMessage.builder().chatId(message.getChatId().toString()).text("Уведомление добавлено")
         .build();
 
@@ -137,6 +122,22 @@ public class OtusBot extends TelegramLongPollingBot {
   }
 
   private void handleDelete(Message message) throws TelegramApiException {
+    Optional<HeartBeatsNotification> notification = MessageParser.parse(message.getText());
+
+    if (notification.isEmpty()) {
+      handleError(message, "Некорректные параметры");
+      return;
+    }
+    String user = message.getFrom().getUserName();
+
+    try {
+      deleteNotificationApiQuery.execute(user, notification.get());
+
+    } catch (ApiCallException exception) {
+      log.error("Error during querying", exception);
+      handleError(message, exception.getMessage());
+    }
+
     SendMessage sendMessage = SendMessage.builder().chatId(message.getChatId().toString()).text("Уведомление удалено")
         .build();
 

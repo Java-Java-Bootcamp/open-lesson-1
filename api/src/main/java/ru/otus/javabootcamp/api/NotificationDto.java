@@ -1,5 +1,5 @@
 package ru.otus.javabootcamp.api;
 
-public record NotificationDto(Long id, String name, Integer maxHeartBeats, Integer durationInMinutes) {
+public record NotificationDto(Long id, String type, String username, Integer maxHeartBeats, Integer durationInMinutes) {
 
 }
